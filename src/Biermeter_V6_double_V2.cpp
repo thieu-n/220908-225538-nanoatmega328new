@@ -11,7 +11,7 @@ void InterruptFunction2();
 
 
 // TODO: 
-//      Turn LED off after game
+// 
 
 
 #define STOP_ON_FAULT_PICKUP 0   // determines in normal mode whether the program is stopped when a team glass is lifted before the raf glass is lifted
