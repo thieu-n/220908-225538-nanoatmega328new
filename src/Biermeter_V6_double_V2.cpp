@@ -8,6 +8,9 @@ void EEPROMWritelong(int address, long value);
 long EEPROMReadlong(long address);
 void InterruptFunction1();
 void InterruptFunction2();
+void reset_disps();
+void blink(int displNo);
+
 
 
 // TODO: 
@@ -73,7 +76,7 @@ int timerMode = 0;
 
 
 void InterruptFunction1() {
-  if (millis() - startMillis > MINTIME && stop1 == 0) {
+  if (millis() - startMillis > MINTIME && stop1 == 0) {  // if the minimum time has passed, and this timer was not yet stopped
     totTime1 = millis() - startMillis;
     stop1 = 1;
     EEPROMWritelong(0, totTime1); //Set the time in memory
@@ -117,32 +120,16 @@ void loop() {
       digitalWrite(ledPin, 0);  // turn readyled off
       while (digitalRead(RESETPIN)) { // wait until timer is RESETPIN
         if (fault1) {  // if 1 has made a fault
-          if ((millis() % FAULTSPEED) > FAULTSPEED / 2) { // Check if more than half the FAULTSPEED period has passed
-            display1.setBrightness(BRIGHT_HIGH);
-          } else {
-            display1.setBrightness(BRIGHT_LOW);
-          }
-          display1.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
+            blink(1);
         }
         if (fault2) { // if 2 has made a fault
-          if ((millis() % FAULTSPEED) > FAULTSPEED / 2) { // blink
-            display2.setBrightness(BRIGHT_HIGH);
-          } else {
-            display2.setBrightness(BRIGHT_LOW);
-          }
-          display2.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
+            blink(2);
         }
       }
 
       // if the time is reset, do the following
-      fault1 = 0;
-      fault2 = 0;
-      display1.setBrightness(BRIGHT_HIGH);
-      display2.setBrightness(BRIGHT_HIGH);
-      totTime1 = 0;
-      totTime2 = 0;
-      display1.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
-      display2.showNumberDec(totTime2, 0b00100000, true, 6);  // time in ms
+      reset_disps();
+
       placeTime = millis(); // last time at which all glasses were not placed
       while (!exit1Flag) {    // wait for all glasses and 0.5 seconds
         if (!digitalRead(in1) && !digitalRead(in2) && !digitalRead(in3)) {       //if all glasses are placed
@@ -165,22 +152,11 @@ void loop() {
         }
   	    if(STOP_ON_FAULT_PICKUP){
           if (fault1) { // if 1 has made a fault, stop everything and blink
-            if ((millis() % FAULTSPEED) > FAULTSPEED / 2) { // Check if more than half the FAULTSPEED period has passed
-              display1.setBrightness(BRIGHT_HIGH);
-            } else {
-              display1.setBrightness(BRIGHT_LOW);
-            }
-            display1.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
+              blink(1);
           }
           if (fault2) { // if 2 has made a fault
-            if ((millis() % FAULTSPEED) > FAULTSPEED / 2) { // blink
-              display2.setBrightness(BRIGHT_HIGH);
-            } else {
-              display2.setBrightness(BRIGHT_LOW);
-            }
-            display2.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
-          }
-        }
+            blink(2);
+         }
       }
       // here, the ref has picked up his glass
       digitalWrite(ledPin, 0);  // turn readyled off
@@ -194,20 +170,10 @@ void loop() {
         }
         if(STOP_ON_FAULT_PUTDOWN){
           if (fault1) { // if 1 has made a fault
-            if ((millis() % FAULTSPEED) > FAULTSPEED / 2) { // Check if more than half the FAULTSPEED period has passed
-              display1.setBrightness(BRIGHT_HIGH);
-            } else {
-              display1.setBrightness(BRIGHT_LOW);
-            }
-            display1.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
+            blink(1);
           }
           if (fault2) { // if 2 has made a fault
-            if ((millis() % FAULTSPEED) > FAULTSPEED / 2) { // blink
-              display2.setBrightness(BRIGHT_HIGH);
-            } else {
-              display2.setBrightness(BRIGHT_LOW);
-            }
-            display2.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
+            blink(2);
           }
         }
       }
@@ -215,7 +181,7 @@ void loop() {
       stop1 = 0;  // reset stopflags for interrupts
       stop2 = 0;
       startMillis = millis();   // set time of starting match
-      while (!stop1 || !stop2) {    //the timer has started and is counting up, keep going till the interrupt functions sets both stop flags to 1, or reset
+      while (!(stop1 && stop2)) {    //the timer has started and is counting up, keep going till the interrupt functions sets both stop flags to 1, or reset
         roundStart = millis() - startMillis;   // timer for displaying
         if (!stop1) { // if the interrupt-flag has not been set, keep updating the time
           totTime1 = roundStart;  
@@ -225,34 +191,18 @@ void loop() {
         }
 
         if (fault1) { // if 1 has made a fault before, flash its clock to indicate this
-          if ((millis() % FAULTSPEED) > FAULTSPEED / 2) { // Check if more than half the FAULTSPEED period has passed
-            display1.setBrightness(BRIGHT_HIGH);
-          } else {
-            display1.setBrightness(BRIGHT_LOW);
-          }
+            blink(1);
         }
         if (fault2) { // if 2 has made a fault
-          if ((millis() % FAULTSPEED) > FAULTSPEED / 2) { // blink
-            display2.setBrightness(BRIGHT_HIGH);
-          } else {
-            display2.setBrightness(BRIGHT_LOW);
-          }
+            blink(2);
         }
 
         display1.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
         display2.showNumberDec(totTime2, 0b00100000, true, 6);  // time in ms
 
         if (!digitalRead(RESETPIN)) { // if RESETPIN button is pressed
-          totTime1 = 0;
-          totTime2 = 0;
-          fault1 = 0;
-          fault2 = 0;
-          display1.setBrightness(BRIGHT_HIGH);
-          display2.setBrightness(BRIGHT_HIGH);
-          display1.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
-          display2.showNumberDec(totTime2, 0b00100000, true, 6);  // time in ms
-          digitalWrite(ledPin, 0);  // turn readyled off
-          break;     // start over from the top
+          reset_disps();
+          goto Start;
         }
 
         if (millis() - blinkTime > FLASHSPEED) {    // blink
@@ -401,6 +351,28 @@ void loop() {
       break;
   }
 }
+
+void reset_disps(){
+  totTime1 = 0;
+  totTime2 = 0;
+  fault1 = 0;
+  fault2 = 0;
+  display1.setBrightness(BRIGHT_HIGH);
+  display2.setBrightness(BRIGHT_HIGH);
+  display1.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
+  display2.showNumberDec(totTime2, 0b00100000, true, 6);  // time in ms
+  digitalWrite(ledPin, 0);  // turn readyled off
+}
+
+void blink(int displNo){
+  if ((millis() % FAULTSPEED) > FAULTSPEED / 2) { // Check if more than half the FAULTSPEED period has passed
+    displNo == 1? display1.setBrightness(BRIGHT_HIGH) : display2.setBrightness(BRIGHT_HIGH);
+  } else {
+    displNo == 1? display1.setBrightness(BRIGHT_LOW) : display2.setBrightness(BRIGHT_LOW);
+  }
+  displNo == 1? display1.showNumberDec(totTime1, 0b00100000, true, 6) : display2.showNumberDec(totTime2, 0b00100000, true, 6);  // time in ms
+}
+
 
 
 
