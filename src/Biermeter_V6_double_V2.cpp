@@ -10,6 +10,8 @@ void InterruptFunction1();
 void InterruptFunction2();
 void reset_disps();
 void blink(int displNo);
+void updateDisplays(bool disp1Fault, bool disp2Fault);
+
 
 
 
@@ -38,10 +40,14 @@ int MINTIME = 10000;     // fake constant for minimal time before team can stop,
 
 #define in3 4
 
+const uint8_t DISPLAYBRIGHTNESS[2] = {0,7};
+bool displayBrightnessBool = 1;       //what is the brightness the display should have
+bool changeDispBrightness = 0;        // should the brightness be changed?
 
 
 TM1637TinyDisplay6 display1(CLK1, DIO1);
 TM1637TinyDisplay6 display2(CLK2, DIO2);
+
 
 uint8_t data[] = { 0, 0, 0, 0, 0, 0};
 
@@ -50,8 +56,9 @@ volatile long totTime1 = 3140;      //Length of adt, =millis - starttime
 volatile long totTime2 = 3140;      //Length of adt, =millis - starttime
 unsigned long liftTime = 0;
 unsigned long placeTime = 0;
-unsigned long roundStart = 0;
+unsigned long currentTime = 0;
 unsigned long blinkTime = 0;
+unsigned long totTimes[2] = {3140, 3140};
 
 volatile bool stop1 = 0;    //gets called in interrupt function
 volatile bool stop2 = 0;
@@ -63,7 +70,7 @@ bool fault1 = 0;            // team 1 has made an error
 bool fault2 = 0;
 bool faultFlash1 = 0;       // bool for if flash needs to be high or low on fault
 bool faultFlash2 = 0;
-//bool placed = 0;
+unsigned long blinkStartMillis = 0;
 
 int timerMode = 0;
 /*
@@ -74,22 +81,6 @@ int timerMode = 0;
     mode 1 and 2 are sub-modes for mode 5 for when a player makes a fault
 */
 
-
-void InterruptFunction1() {
-  if (millis() - startMillis > MINTIME && stop1 == 0) {  // if the minimum time has passed, and this timer was not yet stopped
-    totTime1 = millis() - startMillis;
-    stop1 = 1;
-    EEPROMWritelong(0, totTime1); //Set the time in memory
-  }
-}
-
-void InterruptFunction2() {
-  if (millis() - startMillis > MINTIME && stop2 == 0) {
-    totTime2 = millis() - startMillis;
-    stop2 = 1;
-    EEPROMWritelong(4, totTime2); //Set the time in memory
-  }
-}
 
 void setup() {
   pinMode(in1, INPUT_PULLUP);
@@ -109,6 +100,13 @@ void setup() {
   if (!digitalRead(RESETPIN)) {
     timerMode = 3;
   }
+  // while(1){
+  //   //updateDisplays(0,0);
+  // delay(100);
+  // display1.showNumberDec(totTime1, 0b00100000, true, 6);
+  // delay(100);
+  // display2.showNumberDec(totTime2, 0b00100000, true, 6);
+  // }
 }
 
 void loop() {
@@ -119,12 +117,7 @@ void loop() {
       // start state: last times are displayed, wait for reset, flash screens of team that made a misstake 
       digitalWrite(ledPin, 0);  // turn readyled off
       while (digitalRead(RESETPIN)) { // wait until timer is RESETPIN
-        if (fault1) {  // if 1 has made a fault
-            blink(1);
-        }
-        if (fault2) { // if 2 has made a fault
-            blink(2);
-        }
+        updateDisplays(fault1,fault2);
       }
 
       // if the time is reset, do the following
@@ -144,37 +137,26 @@ void loop() {
       exit1Flag = 0;  // reset exitflag for next round
 
       while (!digitalRead(in3)) {  // wait for ref to pick up glass
-        if (digitalRead(in1)) {
-          fault1 = 1;         // raise fault flag
+        updateDisplays(fault1,fault2);
+        if(!digitalRead(RESETPIN)){
+          reset_disps();
+          goto Start;
         }
-        if (digitalRead(in2)) {
-          fault2 = 1;
-        }
-  	    if(STOP_ON_FAULT_PICKUP){
-          if (fault1) { // if 1 has made a fault, stop everything and blink
-              blink(1);
-          }
-          if (fault2) { // if 2 has made a fault
-            blink(2);
-         }
       }
       // here, the ref has picked up his glass
       digitalWrite(ledPin, 0);  // turn readyled off
       liftTime = millis();
       while (digitalRead(in3) || millis() - liftTime < 500) {  // wait for ref to place glass
-        if (digitalRead(in1)) {
-          fault1 = 1;         // raise fault flag
+        updateDisplays(fault1,fault2);
+        if(digitalRead(in1)){
+          fault1 = 1;
         }
-        if (digitalRead(in2)) {
+        if(digitalRead(in2)){
           fault2 = 1;
         }
-        if(STOP_ON_FAULT_PUTDOWN){
-          if (fault1) { // if 1 has made a fault
-            blink(1);
-          }
-          if (fault2) { // if 2 has made a fault
-            blink(2);
-          }
+        if(!digitalRead(RESETPIN)){
+          reset_disps();
+          goto Start;
         }
       }
 
@@ -182,30 +164,20 @@ void loop() {
       stop2 = 0;
       startMillis = millis();   // set time of starting match
       while (!(stop1 && stop2)) {    //the timer has started and is counting up, keep going till the interrupt functions sets both stop flags to 1, or reset
-        roundStart = millis() - startMillis;   // timer for displaying
+        currentTime = millis() - startMillis;   // timer for displaying
         if (!stop1) { // if the interrupt-flag has not been set, keep updating the time
-          totTime1 = roundStart;  
+          totTime1 = currentTime;  
         }
         if (!stop2) { //
-          totTime2 = roundStart;
+          totTime2 = currentTime;
         }
-
-        if (fault1) { // if 1 has made a fault before, flash its clock to indicate this
-            blink(1);
-        }
-        if (fault2) { // if 2 has made a fault
-            blink(2);
-        }
-
-        display1.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
-        display2.showNumberDec(totTime2, 0b00100000, true, 6);  // time in ms
-
+        updateDisplays(fault1,fault2);
         if (!digitalRead(RESETPIN)) { // if RESETPIN button is pressed
           reset_disps();
           goto Start;
         }
 
-        if (millis() - blinkTime > FLASHSPEED) {    // blink
+        if (millis() - blinkTime > FLASHSPEED) {    // blink LED
           blinkTime = millis();
           digitalWrite(ledPin, !digitalRead(ledPin));
         }
@@ -260,10 +232,12 @@ void loop() {
         if (!digitalRead(in1)) {
           timerMode = 4;
           display2.showString("Duel");
+          delay(1000);
           exit3Flag = 1;
         } else if (!digitalRead(in2)) {
           timerMode = 5;
           display2.showString("Pract");
+          delay(1000);
           exit3Flag = 1;
         }
       }
@@ -277,12 +251,10 @@ void loop() {
 
     case 5: //  -----------------------------------------------------    Pickup practice mode   -----------------------------------------------------------------------
       while (digitalRead(RESETPIN)) { // wait until timer is reset
-        delay(1);
+        updateDisplays(fault1,fault2);
       }
-      totTime1 = 0;
-      totTime2 = 0;
-      display1.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
-      display2.showNumberDec(totTime2, 0b00100000, true, 6);  // time in ms
+      reset_disps();
+      updateDisplays(fault1,fault2);
       placeTime = millis();
       while (!exit1Flag) {
         if (!digitalRead(in1) && !digitalRead(in2) && !digitalRead(in3)) {       //if all glasses are placed
@@ -295,15 +267,14 @@ void loop() {
         }
       }
       exit1Flag = 0;
-
+      totTime1 = 0;
+      totTime2 = 0;
       while (!digitalRead(in3)) {  // wait for ref to pick up glass, if any player makes a misstake, go to mode 1/2 to display this
         if (digitalRead(in1)) {
-          timerMode = 1;
-          goto Start;
+          fault1 = 1;
         }
         if (digitalRead(in2)) {
-          timerMode = 2;
-          goto Start;
+          fault2 = 1;
         }
       }
       digitalWrite(ledPin, 0);  // turn readyled off when glass is picked up
@@ -311,44 +282,63 @@ void loop() {
       liftTime = millis();
       while (digitalRead(in3) || millis() - liftTime < 500) {  // wait for ref to place glass if any player makes a misstake, go to mode 1/2 to display this
         if (digitalRead(in1)) {
-          timerMode = 1;
-          goto Start;
+          fault1 = 1;
         }
         if (digitalRead(in2)) {
-          timerMode = 2;
-          goto Start;
+          fault2 = 1;
         }
+        updateDisplays(fault1,fault2);
       }
-      stop15 = 0;  // RESETPIN stopflags, enabeling
+      stop15 = 0;  // reset stopflags, use separate stopflags as in this case the lifting of the glasses is measured, not the placing
       stop25 = 0;
+      totTime1 = 0;
+      totTime2 = 0;
       startMillis = millis();
-      while (!stop15 || !stop25) {    //while both stop flags have not been set
-        roundStart = millis() - startMillis;
-        if (digitalRead(in1) && stop15 == 0) {     // stop when glass is lifted
-          totTime1 = roundStart;
+      while (!(stop15 && stop25)) {    //while both stop flags have not been set
+        currentTime = millis() - startMillis;       //
+        if(digitalRead(in1)){
           stop15 = 1;
-        }
-        if (digitalRead(in2) && stop25 == 0) {    // stop when glass is lifted
-          totTime2 = roundStart;
+        }        
+        if(digitalRead(in2)){
           stop25 = 1;
         }
+
+        if (!stop15) {     // stop when glass is lifted
+          totTime1 = currentTime;
+        }
+        if (!stop25) {    // stop when glass is lifted
+          totTime2 = currentTime;
+        }
         if (!digitalRead(RESETPIN)) { // if reset button is pressed, just reset everything
-          totTime1 = 0;
-          totTime2 = 0;
-          display1.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
-          display2.showNumberDec(totTime2, 0b00100000, true, 6);  // time in ms
-          break;     // start over from the top, still with program 5
+          reset_disps();
+          goto Start;     // start over from the top
         }
 
-        if (millis() - blinkTime > FLASHSPEED) {    // blink
+        if (millis() - blinkTime > FLASHSPEED) {    // blink LED
           blinkTime = millis();
           digitalWrite(ledPin, !digitalRead(ledPin));
         }
+        updateDisplays(fault1,fault2);
       }
       digitalWrite(ledPin, 0);
-      display1.showNumberDec(totTime1, 0b00100000, true, 6);  // time in ms
-      display2.showNumberDec(totTime2, 0b00100000, true, 6);  // time in ms
       break;
+      }
+  }
+
+
+void InterruptFunction1() {
+  if (millis() - startMillis > MINTIME && stop1 == 0) {  // if the minimum time has passed, and this timer was not yet stopped
+    totTime1 = millis() - startMillis;
+    stop1 = 1;
+    EEPROMWritelong(0, totTime1); //Set the time in memory
+  }
+}
+
+void InterruptFunction2() {
+  if (millis() - startMillis > MINTIME && stop2 == 0) {
+    totTime2 = millis() - startMillis;
+    stop2 = 1;
+    EEPROMWritelong(4, totTime2); //Set the time in memory
   }
 }
 
@@ -364,16 +354,23 @@ void reset_disps(){
   digitalWrite(ledPin, 0);  // turn readyled off
 }
 
-void blink(int displNo){
-  if ((millis() % FAULTSPEED) > FAULTSPEED / 2) { // Check if more than half the FAULTSPEED period has passed
-    displNo == 1? display1.setBrightness(BRIGHT_HIGH) : display2.setBrightness(BRIGHT_HIGH);
-  } else {
-    displNo == 1? display1.setBrightness(BRIGHT_LOW) : display2.setBrightness(BRIGHT_LOW);
+void updateDisplays(bool disp1Fault, bool disp2Fault){
+  if(millis() - blinkStartMillis > FAULTSPEED){
+    blinkStartMillis = millis();
+    displayBrightnessBool = !displayBrightnessBool;
+      if(disp1Fault){
+        Serial.print(" 1 fault");
+        display1.setBrightness(DISPLAYBRIGHTNESS[displayBrightnessBool],1);
+      }
+      if(disp2Fault){
+        Serial.print(" 2 fault");
+        display2.setBrightness(DISPLAYBRIGHTNESS[displayBrightnessBool],1);
+      }
+      Serial.println();
   }
-  displNo == 1? display1.showNumberDec(totTime1, 0b00100000, true, 6) : display2.showNumberDec(totTime2, 0b00100000, true, 6);  // time in ms
+  display1.showNumberDec(totTime1, 0b00100000, true, 6);
+  display2.showNumberDec(totTime2, 0b00100000, true, 6);
 }
-
-
 
 
 void EEPROMWritelong(int address, long value)
